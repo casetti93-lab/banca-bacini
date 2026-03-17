@@ -56,4 +56,194 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .btn-approve-j { background: #E6F1FB; border-color: #85B7EB; color: #0C447C; }
 .btn-approve-z { background: #FBEAF0; border-color: #ED93B1; color: #72243E; }
 .btn-reject { background: #fff0f0; border-color: #f5b5b5; color: #c0392b; }
-.log-item { display: flex; justify-content: space-between;
+.log-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid #f0f0f0; }
+.log-item:last-child { border-bottom: none; }
+.li-desc { font-size: 13px; }
+.li-meta { font-size: 11px; color: #bbb; margin-top: 2px; }
+.li-amount { font-size: 14px; font-weight: 600; }
+.li-amount.pos { color: #2e7d52; }
+.li-amount.neg { color: #c0392b; }
+.empty { text-align: center; padding: 1.5rem; font-size: 13px; color: #ccc; }
+.toast-wrap { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 999; width: 90%; max-width: 360px; pointer-events: none; }
+.toast { background: white; border: 1px solid #e0e0e0; border-radius: 10px; padding: 10px 16px; font-size: 13px; text-align: center; margin-bottom: 8px; }
+.toast.success { background: #f0faf4; border-color: #a8d5b5; color: #2e7d52; }
+.toast.warning { background: #fffbf0; border-color: #f0d080; color: #8a6500; }
+.toast.error { background: #fff0f0; border-color: #f5b5b5; color: #c0392b; }
+</style>
+</head>
+<body>
+<div class="toast-wrap" id="toast-area"></div>
+<div class="app">
+  <div class="header">
+    <h1>Banca dei Bacini</h1>
+    <p><span class="status-dot" id="status-dot"></span><span id="status-text">Connessione in corso...</span></p>
+  </div>
+  <div id="root"></div>
+</div>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyBKoEbOjsiy8KSeSz21KeNCck5fGmE7pKw",
+  authDomain: "banca-centrale-bacini.firebaseapp.com",
+  databaseURL: "https://banca-centrale-bacini-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "banca-centrale-bacini",
+  storageBucket: "banca-centrale-bacini.firebasestorage.app",
+  messagingSenderId: "551665435965",
+  appId: "1:551665435965:web:b78cf422cd9392972e3154"
+});
+const db = firebase.database();
+const names = { jamal: 'Jamal', zaira: 'Zaira' };
+let state = { balances: { jamal: 0, zaira: 0 }, pending: {}, log: {}, selAccount: 'jamal', selProposer: 'jamal' };
+function setConnected(ok) {
+  document.getElementById('status-dot').className = 'status-dot' + (ok ? ' connected' : '');
+  document.getElementById('status-text').textContent = ok ? 'Connesso — aggiornamenti in tempo reale' : 'Connessione in corso...';
+}
+function showToast(msg, type) {
+  const a = document.getElementById('toast-area');
+  const t = document.createElement('div');
+  t.className = 'toast ' + (type || '');
+  t.textContent = msg;
+  a.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+function selAccount(who) { state.selAccount = who; render(); }
+function selProposer(who) { state.selProposer = who; render(); }
+function propose(type) {
+  const amt = parseInt(document.getElementById('amt').value);
+  const reason = document.getElementById('reason').value.trim();
+  if (!amt || amt <= 0) { showToast('Inserisci un importo valido', 'error'); return; }
+  if (!reason) { showToast('Inserisci un motivo', 'error'); return; }
+  if (type === 'withdraw' && (state.balances[state.selAccount] || 0) < amt) { showToast('Saldo insufficiente!', 'error'); return; }
+  db.ref('pending').push({
+    type, account: state.selAccount, amount: amt, reason,
+    proposer: state.selProposer,
+    approvals: { [state.selProposer]: true },
+    ts: new Date().toLocaleString('it-IT', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })
+  });
+  document.getElementById('amt').value = '';
+  document.getElementById('reason').value = '';
+  showToast("Operazione proposta — in attesa dell'altra approvazione", 'warning');
+}
+function approve(id, who) {
+  const op = state.pending[id];
+  if (!op) return;
+  if (op.approvals && op.approvals[who]) { showToast('Hai già approvato', ''); return; }
+  const newApprovals = Object.assign({}, op.approvals, { [who]: true });
+  if (Object.keys(newApprovals).length >= 2) {
+    const newBal = Object.assign({}, state.balances);
+    if (op.type === 'deposit') newBal[op.account] = (newBal[op.account] || 0) + op.amount;
+    else newBal[op.account] = Math.max(0, (newBal[op.account] || 0) - op.amount);
+    const updates = {};
+    updates['balances'] = newBal;
+    updates['pending/' + id] = null;
+    updates['log/' + Date.now()] = Object.assign({}, op, { approvals: newApprovals, finalTs: new Date().toLocaleString('it-IT', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) });
+    db.ref().update(updates);
+    showToast('Operazione eseguita!', 'success');
+  } else {
+    db.ref('pending/' + id + '/approvals').update({ [who]: true });
+    showToast(names[who] + " ha approvato — in attesa dell'altra firma", 'warning');
+  }
+}
+function reject(id) {
+  db.ref('pending/' + id).remove();
+  showToast('Operazione annullata', 'error');
+}
+function render() {
+  const pendingArr = Object.entries(state.pending || {});
+  const logArr = Object.entries(state.log || {}).sort((a, b) => b[0] - a[0]).slice(0, 30);
+  const sj = state.selAccount === 'jamal', sz = state.selAccount === 'zaira';
+  const pj = state.selProposer === 'jamal', pz = state.selProposer === 'zaira';
+  document.getElementById('root').innerHTML = `
+    <div class="accounts">
+      <div class="account-card jamal">
+        <div class="initials">JC</div>
+        <div class="name">Jamal</div>
+        <div class="balance-label">saldo</div>
+        <div class="balance">${state.balances.jamal || 0} <span>B</span></div>
+      </div>
+      <div class="account-card zaira">
+        <div class="initials">ZA</div>
+        <div class="name">Zaira</div>
+        <div class="balance-label">saldo</div>
+        <div class="balance">${state.balances.zaira || 0} <span>B</span></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Nuova operazione</div>
+      <div class="field">
+        <label>Conto</label>
+        <div class="selector-row">
+          <button class="selector-btn ${sj ? 'active-j' : ''}" onclick="selAccount('jamal')">Jamal</button>
+          <button class="selector-btn ${sz ? 'active-z' : ''}" onclick="selAccount('zaira')">Zaira</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Importo (B)</label>
+        <input type="number" id="amt" min="1" placeholder="es. 10" />
+      </div>
+      <div class="field">
+        <label>Motivo</label>
+        <input type="text" id="reason" placeholder="es. caffè portato a letto" />
+      </div>
+      <div class="field">
+        <label>Proposta da</label>
+        <div class="selector-row">
+          <button class="selector-btn ${pj ? 'active-j' : ''}" onclick="selProposer('jamal')">Jamal</button>
+          <button class="selector-btn ${pz ? 'active-z' : ''}" onclick="selProposer('zaira')">Zaira</button>
+        </div>
+      </div>
+      <div class="op-buttons">
+        <button class="btn-deposit" onclick="propose('deposit')">+ Versamento</button>
+        <button class="btn-withdraw" onclick="propose('withdraw')">− Prelievo</button>
+      </div>
+      <p class="note">L'altra parte dovrà approvare prima che l'operazione abbia effetto</p>
+    </div>
+    ${pendingArr.length > 0 ? `
+    <div class="pending-section">
+      <div class="pending-title">In attesa di approvazione (${pendingArr.length})</div>
+      ${pendingArr.map(([id, op]) => {
+        const hj = !!(op.approvals && op.approvals.jamal);
+        const hz = !!(op.approvals && op.approvals.zaira);
+        const sign = op.type === 'deposit' ? '+' : '−';
+        return `<div class="pending-item">
+          <div class="pi-header">
+            <div class="pi-desc">${op.type === 'deposit' ? 'Versamento' : 'Prelievo'} · ${names[op.account]}</div>
+            <div class="pi-amount ${op.type === 'deposit' ? 'dep' : 'wit'}">${sign}${op.amount} B</div>
+          </div>
+          <div class="pi-meta">${op.reason} · da ${names[op.proposer]} · ${op.ts}</div>
+          <div class="pi-approvals">
+            <div class="pi-chip ${hj ? 'approved' : 'pending-c'}">Jamal ${hj ? '✓' : '…'}</div>
+            <div class="pi-chip ${hz ? 'approved' : 'pending-c'}">Zaira ${hz ? '✓' : '…'}</div>
+          </div>
+          <div class="pi-actions">
+            ${!hj ? `<button class="btn-approve-j" onclick="approve('${id}','jamal')">Approva Jamal</button>` : ''}
+            ${!hz ? `<button class="btn-approve-z" onclick="approve('${id}','zaira')">Approva Zaira</button>` : ''}
+            <button class="btn-reject" onclick="reject('${id}')">Annulla</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+    <div class="panel">
+      <div class="panel-title">Storico</div>
+      ${logArr.length === 0 ? '<div class="empty">Nessuna operazione ancora</div>' :
+        logArr.map(([, op]) => `
+          <div class="log-item">
+            <div>
+              <div class="li-desc">${op.reason}</div>
+              <div class="li-meta">Conto ${names[op.account]} · ${op.finalTs}</div>
+            </div>
+            <div class="li-amount ${op.type === 'deposit' ? 'pos' : 'neg'}">${op.type === 'deposit' ? '+' : '−'}${op.amount} B</div>
+          </div>`).join('')}
+    </div>
+  `;
+}
+db.ref('/').on('value', snap => {
+  const data = snap.val() || {};
+  state.balances = data.balances || { jamal: 0, zaira: 0 };
+  state.pending = data.pending || {};
+  state.log = data.log || {};
+  setConnected(true);
+  render();
+}, () => setConnected(false));
+</script>
+</body>
+</html>
