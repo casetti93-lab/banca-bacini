@@ -1,1 +1,59 @@
-
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Banca dei Bacini</title>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #1a1a1a; }
+.app { max-width: 480px; margin: 0 auto; padding: 1rem; }
+.header { text-align: center; background: white; margin: -1rem -1rem 1.25rem; padding: 1.25rem 1rem 1rem; border-bottom: 1px solid #e0e0e0; }
+.header h1 { font-size: 20px; font-weight: 600; }
+.header p { font-size: 13px; color: #888; margin-top: 4px; }
+.status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #ccc; margin-right: 5px; vertical-align: middle; }
+.status-dot.connected { background: #4caf50; }
+.accounts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1.25rem; }
+.account-card { background: white; border: 1px solid #e0e0e0; border-radius: 12px; padding: 1rem; }
+.initials { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.jamal .initials { background: #E6F1FB; color: #0C447C; }
+.zaira .initials { background: #FBEAF0; color: #72243E; }
+.name { font-size: 13px; font-weight: 500; color: #555; }
+.balance-label { font-size: 11px; color: #aaa; margin-top: 6px; }
+.balance { font-size: 28px; font-weight: 600; line-height: 1.1; }
+.balance span { font-size: 13px; color: #888; font-weight: 400; }
+.panel { background: white; border: 1px solid #e0e0e0; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+.panel-title { font-size: 11px; font-weight: 600; color: #aaa; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.8px; }
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 12px; color: #888; margin-bottom: 5px; }
+.field input { width: 100%; padding: 8px 10px; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 14px; outline: none; }
+.field input:focus { border-color: #aaa; }
+.selector-row { display: flex; gap: 6px; }
+.selector-btn { flex: 1; padding: 7px; font-size: 13px; border-radius: 8px; cursor: pointer; border: 1px solid #e0e0e0; background: transparent; color: #888; }
+.selector-btn.active-j { background: #E6F1FB; border-color: #85B7EB; color: #0C447C; font-weight: 500; }
+.selector-btn.active-z { background: #FBEAF0; border-color: #ED93B1; color: #72243E; font-weight: 500; }
+.op-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.btn-deposit { background: #f0faf4; border: 1px solid #a8d5b5; color: #2e7d52; border-radius: 8px; padding: 9px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.btn-withdraw { background: #fff0f0; border: 1px solid #f5b5b5; color: #c0392b; border-radius: 8px; padding: 9px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.note { font-size: 11px; color: #bbb; text-align: center; margin-top: 10px; }
+.pending-section { margin-bottom: 1rem; }
+.pending-title { font-size: 11px; font-weight: 600; color: #aaa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.8px; }
+.pending-item { background: #fffbf0; border: 1px solid #f0d080; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.pi-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.pi-desc { font-size: 13px; font-weight: 500; }
+.pi-amount { font-size: 15px; font-weight: 600; }
+.pi-amount.dep { color: #2e7d52; }
+.pi-amount.wit { color: #c0392b; }
+.pi-meta { font-size: 11px; color: #aaa; margin-bottom: 8px; }
+.pi-approvals { display: flex; gap: 6px; margin-bottom: 8px; }
+.pi-chip { font-size: 11px; padding: 3px 9px; border-radius: 20px; border: 1px solid; font-weight: 500; }
+.pi-chip.approved { background: #f0faf4; border-color: #a8d5b5; color: #2e7d52; }
+.pi-chip.pending-c { background: #f5f5f5; border-color: #e0e0e0; color: #aaa; }
+.pi-actions { display: flex; gap: 6px; }
+.pi-actions button { flex: 1; font-size: 12px; padding: 6px; border-radius: 8px; cursor: pointer; border: 1px solid; font-weight: 500; }
+.btn-approve-j { background: #E6F1FB; border-color: #85B7EB; color: #0C447C; }
+.btn-approve-z { background: #FBEAF0; border-color: #ED93B1; color: #72243E; }
+.btn-reject { background: #fff0f0; border-color: #f5b5b5; color: #c0392b; }
+.log-item { display: flex; justify-content: space-between;
